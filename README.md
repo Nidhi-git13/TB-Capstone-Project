@@ -93,6 +93,16 @@ Interested in:
 
 ---
 
+## 📌 Key Findings
+
+- Clinical data from 605 TB patients were analyzed.
+- Age distribution varied across different risk categories.
+- BMI was the most frequently abnormal clinical parameter.
+- Correlation analysis showed only weak relationships among selected clinical variables.
+- District-wise analysis highlighted variations in patient demographics.
+
+---
+
 ## 📊 Dashboard Preview
 
 ### Number of TB Patients by District and Gender
