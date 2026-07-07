@@ -1,0 +1,424 @@
+---
+title: "Assessing Clinical Risk Stratification in TB Patients"
+subtitle: "Can Medical Officers' Risk Assessment Be Improved by an Algorithmic Approach?"
+author:
+  - "Nidhi"
+  - "TB Capstone Research Project"
+date: today
+format:
+  docx:
+    reference-doc: reference-doc.docx
+    toc: true
+    toc-title: "Table of Contents"
+    toc-depth: 2
+    number-sections: false
+execute:
+  warning: false
+  message: false
+---
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
+```{r setup}
+#| include: false
+library(readxl)
+library(dplyr)
+library(tibble)
+library(janitor)
+library(ggplot2)
+library(corrplot)
+
+data <- read_xlsx("../data/clinical parameters_TBpatients.xlsx")
+data <- clean_names(data)
+```
+
+# Background
+
+In this project, we examine clinical data from TB patients to test whether medical
+officers appropriately assess risk based on common danger signs and symptoms, or
+whether an algorithmic (rule-based) approach to risk stratification would perform
+better — particularly for identifying seriously ill patients who need to be
+admitted or referred urgently. The analysis below is organized question by
+question, following the study brief.
+
+# Question 1: Bring the Date of Assessment Column First and Rename it to "start"
+
+**Step 1 — Rename and relocate the column.**
+
+```{r q1}
+data <- data %>%
+  rename(start = date_of_assessment) %>%
+  relocate(start, .before = end)
+
+head(data)
+```
+
+**Result:** The `date_of_assessment` column is renamed to `start` and moved to the
+first position in the dataset, ahead of the `end` column.
+
+# Question 2: Create a Unique ID from the Row ID
+
+**Step 1 — Generate the ID column.**
+
+```{r q2}
+data <- rownames_to_column(data, var = "id")
+head(data$id)
+```
+
+**Result:** Each patient record now has a unique `id` derived from its row number.
+
+# Question 3: Mean Delay in Assessment and Mean Age
+
+**Step 1 — Calculate assessment delay.**
+
+```{r q3a}
+data <- data %>%
+  mutate(assessment_delay = as.numeric(difftime(end, start, units = "days")))
+```
+
+**Step 2 — Calculate the means.**
+
+```{r q3b}
+mean_delay <- mean(data$assessment_delay, na.rm = TRUE)
+mean_age   <- mean(data$age, na.rm = TRUE)
+
+mean_delay
+mean_age
+```
+
+**Step 3 — Check for missing values.**
+
+```{r q3c}
+sum(is.na(data$assessment_delay))
+sum(is.na(data$age))
+```
+
+**Step 4 — Replace missing age values with the mean.**
+
+```{r q3d}
+data <- data %>%
+  mutate(age = ifelse(is.na(age), mean_age, age))
+```
+
+**Result:** The mean delay in assessment was `r round(mean_delay, 2)` days, and the
+mean age of patients was `r round(mean_age, 2)` years. Missing age values were
+replaced with the mean age.
+
+# Question 4: Percentage of Patients with Cough as a Symptom
+
+**Step 1 — Calculate the percentage.**
+
+```{r q4}
+cough_percentage <- mean(data$current_symptoms_cough) * 100
+round(cough_percentage, 2)
+```
+
+**Result:** `r round(cough_percentage, 2)`% of patients reported cough as a symptom.
+
+# Question 5: Stacked Column Chart of Patients by District and Gender
+
+**Step 1 — Build the chart.**
+
+```{r q5}
+#| fig-width: 8
+#| fig-height: 5
+ggplot(data, aes(x = district, fill = gender)) +
+  geom_bar() +
+  labs(
+    title = "Number of TB Patients by District and Gender",
+    x = "District",
+    y = "Number of Patients",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+```
+
+# Question 6: Does Age Follow a Normal Distribution?
+
+**Step 1 — Visualize the distribution.**
+
+```{r q6a}
+#| fig-width: 7
+#| fig-height: 5
+ggplot(data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of Age",
+    x = "Age",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+**Step 2 — Confirm statistically with the Shapiro-Wilk test.**
+
+```{r q6b}
+shapiro.test(data$age)
+```
+
+**Interpretation:**
+
+- The age distribution is not symmetric.
+- Most patients fall between 15 and 35 years.
+- There is a long right tail extending to older ages (50–80 years), indicating a
+  **positively (right) skewed** distribution rather than a bell-shaped one.
+- The Shapiro-Wilk test confirms this statistically (W = 0.946, p < 0.001).
+
+**Conclusion:** Age does **not** follow a normal distribution.
+
+# Question 7: Stratify Patients by Number of Abnormal Parameters
+
+Patients are stratified into risk categories based on the number of abnormal
+clinical parameters:
+
+- **1 abnormal parameter** → Low Risk
+- **2–3 abnormal parameters** → Moderate Risk
+- **≥4 abnormal parameters** → High Risk
+
+**Step 1 — Create the risk category variable.**
+
+```{r q7}
+data <- data %>%
+  mutate(
+    risk_category = case_when(
+      no_of_abnormal_parameters == 1 ~ "Low Risk",
+      no_of_abnormal_parameters >= 2 & no_of_abnormal_parameters <= 3 ~ "Moderate Risk",
+      no_of_abnormal_parameters >= 4 ~ "High Risk",
+      TRUE ~ NA_character_
+    )
+  )
+
+table(data$risk_category)
+```
+
+# Question 8: Cross-Tabulate Medical Officer Risk vs. Algorithmic Risk
+
+This is the central question of the project: how often does a medical officer
+under-classify a patient as low risk when the objective parameter count places
+them at high risk?
+
+**Step 1 — Clean up the medical officer's risk labels.**
+
+```{r q8a}
+data$mo_risk <- recode(
+  data$final_risk_stratification_by_the_medical_officer,
+  "Low risk- Marked for provisional follow-up later." = "Low Risk",
+  "Moderate Risk- Marked for mandatory follow-up later at CHC/PHC/HWC" = "Moderate Risk",
+  "High risk- Referring to District Hospital/Sub-district hospital or tertiary care facility with availability of intensive or emergency or inpatient care." = "High Risk"
+)
+```
+
+**Step 2 — Cross-tabulate.**
+
+```{r q8b}
+cross_tab <- table(data$mo_risk, data$risk_category)
+cross_tab
+```
+
+**Interpretation:** The cross-tabulation above shows the number of patients whom
+the medical officer classified as low risk, cross-referenced against their
+algorithmic (parameter-count-based) risk category. Any patients falling in the
+"Low Risk" row but "High Risk" column represent cases where the medical officer
+under-assessed a seriously ill patient — the key safety concern this project set
+out to investigate.
+
+# Question 9: Descending Order Chart of Abnormal Parameters
+
+**Step 1 — Count patients with each abnormal parameter.**
+
+```{r q9a}
+# Each of these columns is a 0/1 flag per the data dictionary (1 = abnormal),
+# so column sums give the number of patients with that parameter abnormal.
+abnormal_counts <- data.frame(
+  Parameter = c("Respiratory Rate", "BMI", "Haemoglobin", "Oxygen Saturation"),
+  Count = c(
+    sum(data$respiratory_rate, na.rm = TRUE),
+    sum(data$bmi, na.rm = TRUE),
+    sum(data$haemoglobin, na.rm = TRUE),
+    sum(data$oxygen_saturation, na.rm = TRUE)
+  )
+) %>%
+  arrange(desc(Count))
+
+abnormal_counts
+```
+
+**Step 2 — Plot in descending order.**
+
+```{r q9b}
+#| fig-width: 7
+#| fig-height: 5
+ggplot(abnormal_counts,
+       aes(x = reorder(Parameter, -Count), y = Count, fill = Parameter)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = Count), vjust = -0.2, size = 4, fontface = "bold") +
+  scale_fill_manual(values = c("#0F6E6E", "#2A9D8F", "#76C7C0", "#B2DFDB")) +
+  labs(
+    title = "Number of Persons with Abnormal Parameters",
+    x = "Clinical Parameter",
+    y = "Number of Persons"
+  ) +
+  expand_limits(y = 380) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    axis.title = element_text(face = "bold", size = 9),
+    axis.text = element_text(face = "bold", size = 7),
+    legend.position = "none"
+  )
+```
+
+**Result:** BMI was the most frequently abnormal parameter (352 patients),
+followed by respiratory rate (171), haemoglobin (138), and oxygen saturation (57).
+
+# Question 10: Subset of Male Patients Without Blood in Sputum
+
+**Step 1 — Create the subset.**
+
+```{r q10}
+male_no_blood <- subset(data, gender == "Male" & blood_in_sputum == 0)
+nrow(male_no_blood)
+head(male_no_blood)
+```
+
+# Question 11: Additional Analysis (Optional)
+
+*Exploratory analysis beyond the core questions.*
+
+## Step 1: Risk Category by District
+
+```{r q11a}
+#| fig-width: 8
+#| fig-height: 5
+table(data$district, data$risk_category)
+
+ggplot(data, aes(x = district, fill = risk_category)) +
+  geom_bar() +
+  scale_fill_manual(values = c("#0F6E6E", "#76C7C0", "#B2DFDB")) +
+  labs(
+    title = "Risk Category by District",
+    x = "District",
+    y = "Number of Patients",
+    fill = "Risk Category"
+  ) +
+  theme_minimal()
+```
+
+## Step 2: Assessment Delay by District
+
+```{r q11b}
+#| fig-width: 7
+#| fig-height: 5
+delay_by_district <- aggregate(
+  assessment_delay ~ district,
+  data = data,
+  mean,
+  na.rm = TRUE
+)
+delay_by_district$assessment_delay <- round(delay_by_district$assessment_delay, 2)
+delay_by_district
+
+ggplot(delay_by_district,
+       aes(x = reorder(district, assessment_delay), y = assessment_delay, fill = district)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c("#0F6E6E", "#2A9D8F", "#76C7C0", "#B2DFDB")) +
+  geom_text(aes(label = assessment_delay), vjust = -0.4, fontface = "bold", size = 4) +
+  labs(
+    title = "Average Assessment Delay by District",
+    x = "District",
+    y = "Average Delay (Days)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")
+  )
+```
+
+## Step 3: Distribution of Risk Categories
+
+```{r q11c}
+#| fig-width: 7
+#| fig-height: 5
+ggplot(data, aes(risk_category, fill = risk_category)) +
+  geom_bar() +
+  scale_fill_manual(values = c("#B2DFDB", "#76C7C0", "#0F6E6E")) +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.4, fontface = "bold") +
+  labs(
+    title = "Distribution of Risk Categories",
+    x = "Risk Category",
+    y = "Number of Patients"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")
+  )
+```
+
+## Step 4: Age Distribution by Risk Category
+
+```{r q11d}
+#| fig-width: 7
+#| fig-height: 5
+ggplot(data, aes(risk_category, age, fill = risk_category)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("#B2DFDB", "#76C7C0", "#0F6E6E")) +
+  labs(
+    title = "Age Distribution across Risk Categories",
+    x = "Risk Category",
+    y = "Age"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")
+  )
+```
+
+**Interpretation:**
+
+- Moderate Risk patients had the highest median age among all risk categories.
+- High Risk and Moderate Risk groups showed greater variability in age compared
+  with the Low Risk group.
+- A few older outliers were observed in the Low Risk and NA categories.
+- The considerable overlap in age distributions suggests that age alone does not
+  clearly differentiate patients across risk categories.
+
+## Step 5: Correlation Heatmap of Clinical Parameters
+
+```{r q11e}
+#| fig-width: 6
+#| fig-height: 6
+vars <- data[, c("age", "bmi", "respiratory_rate", "oxygen_saturation", "haemoglobin")]
+corrplot(cor(vars, use = "complete.obs"), method = "color")
+```
+
+**Interpretation:**
+
+- Age shows a very weak positive correlation with BMI.
+- Age has almost no correlation with respiratory rate, oxygen saturation, or haemoglobin.
+- BMI also shows very weak correlations with the remaining variables.
+- Respiratory rate, oxygen saturation, and haemoglobin do not show strong
+  relationships with one another.
+- Overall, none of the variables show a strong correlation (no dark blue or dark
+  red cells outside the diagonal).
+
+# Summary and Conclusion
+
+Overall, this analysis suggests that age skews right rather than following a
+normal distribution, BMI is the most commonly abnormal clinical parameter in this
+population, and — most importantly for the study's core question — the
+cross-tabulation in Question 8 highlights specific instances where medical
+officers' subjective risk classification diverged from the objective,
+parameter-count-based risk category. This supports further exploration of an
+algorithmic approach as a potential safety net for identifying seriously ill TB
+patients who might otherwise be under-triaged.
