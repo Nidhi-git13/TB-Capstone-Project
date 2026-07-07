@@ -90,3 +90,27 @@ Interested in:
 - R Programming
 - Data Visualization
 - Health Technology Assessment
+
+---
+
+## 📊 Dashboard Preview
+
+### Number of TB Patients by District and Gender
+
+![District Gender](age%20and%20gender%20district%20wise.png)
+
+### Age Distribution across Risk Categories
+
+![Risk Category](age%20distribution%20as%20per%20risk%20category.png)
+
+### Distribution of Age
+
+![Age Distribution](distribution%20of%20age.png)
+
+### Correlation Heatmap
+
+![Heatmap](heatmap%20of%20clinical%20parameters.png)
+
+### Persons with Abnormal Clinical Parameters
+
+![Abnormal Parameters](persons%20with%20abnormal%20parameters.png)
